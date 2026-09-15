@@ -1,54 +1,57 @@
-name: Ubuntu SSH Server
+name: Deploy Outline VPN Server on Ubuntu
 
 on:
+  # اجازه اجرای دستی از تب Actions
   workflow_dispatch:
+    inputs:
+      server_name:
+        description: 'نام دلخواه برای سرور'
+        required: false
+        default: 'My-Outline-VPN'
 
 jobs:
-  build:
+  deploy-outline:
+    # استفاده از آخرین نسخه Ubuntu
     runs-on: ubuntu-latest
-    timeout-minutes: 360
 
     steps:
-      - name: 1. Install Tailscale
-        uses: tailscale/github-action@v3
-        with:
-          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-          version: latest
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: 2. Create User & Setup SSH
+      - name: Install Outline Server via Official Script
+        id: install_outline
         run: |
-          # ساخت کاربر جدید با پسورد
-          sudo useradd -m -s /bin/bash sshuser
-          echo "sshuser:P@ssw0rd1qazXSW@#" | sudo chpasswd
-          sudo usermod -aG sudo sshuser
+          # دانلود و اجرای اسکریپت رسمی نصب Outline
+          # این اسکریپت به صورت خودکار پورت‌ها را باز کرده و سرور را راه‌اندازی می‌کند
+          sudo bash -c "$(wget -qO- https://raw.githubusercontent.com/OutlineFoundation/outline-apps/master/server_manager/install_scripts/install_server.sh)" > /tmp/outline_install.log 2>&1
           
-          # اجازه پسورد برای SSH
-          sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
-          sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
-          sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+          # نمایش لاگ‌ها برای دیباگ
+          cat /tmp/outline_install.log
           
-          # ری‌استارت SSH
-          sudo systemctl restart ssh
+          # استخراج اطلاعات JSON (API URL و Cert SHA256) از لاگ
+          # اسکریپت نصب این اطلاعات را در خروجی چاپ می‌کند
+          echo "--- Extracting Outline Configuration ---"
+          grep -o '{"apiUrl":.*}' /tmp/outline_install.log > /tmp/outline_config.json
           
-          echo "SSH configured!" 
+          if [ -s /tmp/outline_config.json ]; then
+            echo "OUTLINE_JSON=$(cat /tmp/outline_config.json)" >> $GITHUB_ENV
+            echo "✅ Outline server installed successfully."
+          else
+            echo "❌ Failed to extract Outline configuration from install logs."
+            exit 1
+          fi
 
-      - name: 3. Show Connection Info
+      - name: Show Connection Info
         run: |
-          TS_IP=$(tailscale ip -4)
-          echo ""
-          echo "=================================================="
-          echo "  >>> UBUNTU SSH SERVER IS READY! <<<"
-          echo "=================================================="
-          echo "  Tailscale IP : $TS_IP"
-          echo "  Username     : sshuser"
-          echo "  Password     : P@ssw0rd1qazXSW@#"
-          echo ""
-          echo "  Command: ssh sshuser@$TS_IP"
-          echo "=================================================="
-
-      - name: 4. Keep Server Alive (6 Hours Max)
-        run: |
-          for i in $(seq 1 360); do
-            sleep 60
-            echo "[$i/360] Ubuntu SSH server running... $(date +%H:%M:%S)"
-          done
+          echo "### 🌐 Outline Server Ready" >> $GITHUB_STEP_SUMMARY
+          echo "این JSON را کپی کرده و در Outline Manager وارد کنید:" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          echo "${{ env.OUTLINE_JSON }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          
+          # نمایش در لاگ Actions
+          echo "----------------------------------------"
+          echo "کد اتصال (JSON):"
+          echo "${{ env.OUTLINE_JSON }}"
+          echo "----------------------------------------"
+          
